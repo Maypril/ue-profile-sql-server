@@ -259,10 +259,6 @@ func (s *Server) AddFile(filename string) error {
 		}
 	}
 
-	if len(rows) >= 1 {
-		fmt.Printf("header: %#v", header)
-	}
-
 	converters := make(map[int]ConverterFunc)
 	// first field is always a string
 	converters[0] = converterFuncString
