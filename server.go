@@ -47,7 +47,7 @@ func NewServer(dir string) (*Server, error) {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
 
-	//todo: setup filewatcher
+	// todo: setup filewatcher
 	db := memory.NewDatabase("db")
 
 	profilesTable := createProfilesTable(db)
@@ -111,7 +111,6 @@ func NewServer(dir string) (*Server, error) {
 }
 
 func (s *Server) Start() error {
-
 	go s.watchForChanges()
 
 	if err := s.server.Start(); err != nil {
@@ -146,7 +145,6 @@ func (s *Server) watchForChanges() {
 var fileNameRe = regexp.MustCompile(`(?m)((.*)\((\d{8}_\d{6})\))\.csv`)
 
 func (s *Server) AddFile(filename string) error {
-
 	if filepath.Ext(filename) != ".csv" {
 		return nil
 	}
@@ -252,8 +250,13 @@ func (s *Server) AddFile(filename string) error {
 		s.profileMetadataTable.Insert(ctx, sql.NewRow(profileName, sql.JSONDocument{Val: metadata}))
 	}
 
+	frameTimeField := 0
+
 	for i := 0; i < len(header); i++ {
 		header[i] = strcase.SnakeCase(keyReplacer.Replace(header[i]))
+		if header[i] == "frame_time" {
+			frameTimeField = i
+		}
 	}
 
 	if len(rows) >= 1 {
@@ -265,7 +268,8 @@ func (s *Server) AddFile(filename string) error {
 	converters[0] = converterFuncString
 
 	schema := sql.Schema{
-		{Name: "frame", Type: sql.Uint32, Nullable: false, Source: profileName, PrimaryKey: true},
+		{Name: "frame", Type: sql.Int64, Nullable: false, Source: profileName, PrimaryKey: true},
+		{Name: "timestamp", Type: sql.Timestamp, Nullable: false, Source: profileName},
 		{Name: "events", Type: sql.Text, Nullable: false, Source: profileName},
 	}
 
@@ -287,10 +291,20 @@ func (s *Server) AddFile(filename string) error {
 
 	table := memory.NewTable(profileName, sql.NewPrimaryKeySchema(schema), s.db.GetForeignKeyCollection())
 
+	frameTimestamp := timestamp
+
 	// alright. time to fill the table
 	for i, row := range rows {
 		rowData := make([]any, 0, len(schema))
-		rowData = append(rowData, uint32(i))
+		rowData = append(rowData, int64(i))
+
+		frameDuration, err := time.ParseDuration(fmt.Sprintf("%vms", row[frameTimeField]))
+		if err != nil {
+			return fmt.Errorf("failed to parse duration: %v", err)
+		}
+		frameTimestamp = frameTimestamp.Add(frameDuration)
+		rowData = append(rowData, frameTimestamp)
+
 		for c, column := range row {
 			data, err := converters[c](column)
 			if err != nil {
